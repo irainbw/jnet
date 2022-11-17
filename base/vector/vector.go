@@ -33,10 +33,11 @@ func (v *Vector) resize(newCount int) {
 	if newCount%VectorBlockSize != 0 {
 		blocks++
 	}
-	v.count = newCount
+
 	v.size = blocks * VectorBlockSize
 	newArray := make([]interface{}, v.size+1)
-	copy(newArray, v.arr)
+	count := copy(newArray, v.arr)
+	v.count = count
 	v.arr = newArray
 }
 
@@ -50,7 +51,7 @@ func (v *Vector) PushBack(value interface{}) {
 	} else {
 		v.count++
 	}
-	v.arr[v.count-1] = value
+	v.arr[v.count] = value
 }
 
 func (v *Vector) Values() []interface{} {
