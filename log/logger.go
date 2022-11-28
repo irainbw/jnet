@@ -1,216 +1,212 @@
 package log
 
 import (
-	"io"
+	"fmt"
 	"os"
 	"sync"
 	"sync/atomic"
+	"time"
 )
 
 type Logger struct {
-	Out          io.Writer
-	ReportCaller bool
-	Level        Level
-	entryPool    sync.Pool
-	BufferPool   BufferPool
-	mux          sync.Mutex
-	Hooks        LevelHooks
-	Formatter    Formatter
+	config  *LogConfig
+	Writers LevelWriters
+	closed  int32
+	mux     sync.Mutex
 }
 
-func New() *Logger {
-	return &Logger{
-		Out:        os.Stdout,
-		Level:      InfoLevel,
-		BufferPool: bufferPool,
-		Formatter:  new(TextFormatter),
-		Hooks:      make(LevelHooks),
+func NewLogger(opts ...Option) (*Logger, error) {
+	opt := &LogConfig{
+		logLevel: InfoLevel,
+	}
+	opt.LoadAllConfig(opts)
+	logger := &Logger{
+		config:  opt,
+		Writers: make(LevelWriters),
+	}
+	if opt.stdout {
+		logger.AddWriter(NewStdWriter())
+	}
+	logFileName := "temp.log"
+	if opt.logFileName != "" {
+		logFileName = opt.logFileName
+	}
+	if opt.logPath != "" {
+		f, err := NewFileWriter(opt.logPath, logFileName, opt.maxSize, opt.maxSaveTime)
+		if err != nil {
+			return nil, err
+		}
+		logger.AddWriter(f)
+	}
+
+	return logger, nil
+}
+
+func (l *Logger) AddWriter(logWriter LogWriter) {
+	l.Writers.Add(logWriter)
+}
+
+func (l *Logger) Close() {
+	if atomic.LoadInt32(&l.closed) == 1 {
+		return
+	}
+	atomic.StoreInt32(&l.closed, 1)
+	for _, writers := range l.Writers {
+		for _, w := range writers {
+			w.Close()
+		}
+	}
+	l.Writers = nil
+}
+
+func Copy(src []byte) (b []byte) {
+	if len(src) > 0 {
+		b = make([]byte, len(src))
+		copy(b, src)
+	}
+	return
+}
+func (l *Logger) log(level Level, message string) {
+	if !l.canOutput(level) {
+		return
+	}
+	var (
+		now         = time.Now()
+		appName     = l.config.name
+		levelPrefix = level.String()
+		timeDesc    = now.Format(SlashWithMillFormat)
+	)
+
+	b := bufferPool.Get()
+	if appName != "" {
+		b.WriteString("[")
+		b.WriteString(appName)
+		b.WriteString("] ")
+	}
+	b.WriteString(levelPrefix)
+	b.WriteString("[")
+	b.WriteString(timeDesc)
+	b.WriteString("] ")
+	b.WriteString(message)
+	b.WriteString("\n")
+	logStr := Copy(b.Bytes())
+	bufferPool.Put(b)
+	l.fireWrite(level, logStr)
+}
+
+func (l *Logger) fireWrite(level Level, b []byte) {
+	var tmpLevelWriters LevelWriters
+	l.mux.Lock()
+	tmpLevelWriters = make(LevelWriters, len(l.Writers))
+	for k, v := range l.Writers {
+		tmpLevelWriters[k] = v
+	}
+	l.mux.Unlock()
+	err := tmpLevelWriters.Fire(level, b)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to fire hook: %v\n", err)
 	}
 }
 
-func (logger *Logger) SetLevel(level Level) {
-	logger.Level = level
-}
-
-func (logger *Logger) SetReportCaller(report bool) {
-	logger.ReportCaller = report
-}
-
-func (logger *Logger) SetOutput(output io.Writer) {
-	logger.mux.Lock()
-	defer logger.mux.Unlock()
-	logger.Out = output
-}
-
-func (logger *Logger) SetFormatter(formatter Formatter) {
-	logger.mux.Lock()
-	defer logger.mux.Unlock()
-	logger.Formatter = formatter
-}
-
-func (logger *Logger) AddHook(hook Hook) {
-	logger.mux.Lock()
-	defer logger.mux.Unlock()
-	logger.Hooks.Add(hook)
-}
-
-func (logger *Logger) newEntry() *Entry {
-	entry, ok := logger.entryPool.Get().(*Entry)
-	if ok {
-		return entry
-	}
-	return NewEntry(logger)
-}
-
-func (logger *Logger) releaseEntry(entry *Entry) {
-	logger.entryPool.Put(entry)
-}
-
-func (logger *Logger) Logf(level Level, format string, args ...interface{}) {
-	if logger.IsLevelEnabled(level) {
-		entry := logger.newEntry()
-		entry.Logf(level, format, args...)
-		logger.releaseEntry(entry)
-	}
-}
-
-func (logger *Logger) Tracef(format string, args ...interface{}) {
-	logger.Logf(TraceLevel, format, args...)
-}
-
-func (logger *Logger) Debugf(format string, args ...interface{}) {
-	logger.Logf(DebugLevel, format, args...)
-}
-
-func (logger *Logger) Infof(format string, args ...interface{}) {
-	logger.Logf(InfoLevel, format, args...)
-}
-
-func (logger *Logger) Printf(format string, args ...interface{}) {
-	entry := logger.newEntry()
-	entry.Printf(format, args...)
-	logger.releaseEntry(entry)
-}
-
-func (logger *Logger) Warnf(format string, args ...interface{}) {
-	logger.Logf(WarnLevel, format, args...)
-}
-
-func (logger *Logger) Warningf(format string, args ...interface{}) {
-	logger.Warnf(format, args...)
-}
-
-func (logger *Logger) Errorf(format string, args ...interface{}) {
-	logger.Logf(ErrorLevel, format, args...)
-}
-
-func (logger *Logger) Fatalf(format string, args ...interface{}) {
-	logger.Logf(FatalLevel, format, args...)
+func (l *Logger) exit() {
+	l.Close()
 	os.Exit(1)
 }
 
-func (logger *Logger) Panicf(format string, args ...interface{}) {
-	logger.Logf(PanicLevel, format, args...)
-}
-
-func (logger *Logger) Log(level Level, args ...interface{}) {
-	if logger.IsLevelEnabled(level) {
-		entry := logger.newEntry()
-		entry.Log(level, args...)
-		logger.releaseEntry(entry)
+func (l *Logger) canOutput(level Level) bool {
+	if atomic.LoadInt32(&l.closed) == 1 {
+		return false
 	}
-}
-
-func (logger *Logger) Trace(args ...interface{}) {
-	logger.Log(TraceLevel, args...)
-}
-
-func (logger *Logger) Debug(args ...interface{}) {
-	logger.Log(DebugLevel, args...)
-}
-
-func (logger *Logger) Info(args ...interface{}) {
-	logger.Log(InfoLevel, args...)
-}
-
-func (logger *Logger) Print(args ...interface{}) {
-	entry := logger.newEntry()
-	entry.Print(args...)
-	logger.releaseEntry(entry)
-}
-
-func (logger *Logger) Warn(args ...interface{}) {
-	logger.Log(WarnLevel, args...)
-}
-
-func (logger *Logger) Warning(args ...interface{}) {
-	logger.Warn(args...)
-}
-
-func (logger *Logger) Error(args ...interface{}) {
-	logger.Log(ErrorLevel, args...)
-}
-
-func (logger *Logger) Fatal(args ...interface{}) {
-	logger.Log(FatalLevel, args...)
-	os.Exit(1)
-}
-
-func (logger *Logger) Panic(args ...interface{}) {
-	logger.Log(PanicLevel, args...)
-}
-
-func (logger *Logger) Logln(level Level, args ...interface{}) {
-	if logger.IsLevelEnabled(level) {
-		entry := logger.newEntry()
-		entry.Logln(level, args...)
-		logger.releaseEntry(entry)
+	if !level.valid() {
+		return false
 	}
+	if l.config.logLevel < level {
+		return false
+	}
+	return true
 }
 
-func (logger *Logger) Traceln(args ...interface{}) {
-	logger.Logln(TraceLevel, args...)
+func (l *Logger) Panic(args ...interface{}) {
+	l.log(PanicLevel, fmt.Sprint(args...))
 }
 
-func (logger *Logger) Debugln(args ...interface{}) {
-	logger.Logln(DebugLevel, args...)
+func (l *Logger) Fatal(args ...interface{}) {
+	l.log(FatalLevel, fmt.Sprint(args...))
+	l.exit()
 }
 
-func (logger *Logger) Infoln(args ...interface{}) {
-	logger.Logln(InfoLevel, args...)
+func (l *Logger) Debug(args ...interface{}) {
+	l.log(DebugLevel, fmt.Sprint(args...))
 }
 
-func (logger *Logger) Println(args ...interface{}) {
-	entry := logger.newEntry()
-	entry.Println(args...)
-	logger.releaseEntry(entry)
+func (l *Logger) Info(args ...interface{}) {
+	l.log(InfoLevel, fmt.Sprint(args...))
 }
 
-func (logger *Logger) Warnln(args ...interface{}) {
-	logger.Logln(WarnLevel, args...)
+func (l *Logger) Error(args ...interface{}) {
+	l.log(ErrorLevel, fmt.Sprint(args...))
 }
 
-func (logger *Logger) Warningln(args ...interface{}) {
-	logger.Warnln(args...)
+func (l *Logger) Print(args ...interface{}) {
+	l.log(InfoLevel, fmt.Sprint(args...))
 }
 
-func (logger *Logger) Errorln(args ...interface{}) {
-	logger.Logln(ErrorLevel, args...)
+func (l *Logger) Warn(args ...interface{}) {
+	l.log(WarnLevel, fmt.Sprint(args...))
 }
 
-func (logger *Logger) Fatalln(args ...interface{}) {
-	logger.Logln(FatalLevel, args...)
-	os.Exit(1)
+func (l *Logger) Panicln(args ...interface{}) {
+	l.log(PanicLevel, fmt.Sprintln(args...))
 }
 
-func (logger *Logger) Panicln(args ...interface{}) {
-	logger.Logln(PanicLevel, args...)
+func (l *Logger) FatalLn(args ...interface{}) {
+	l.log(FatalLevel, fmt.Sprintln(args...))
 }
 
-func (logger *Logger) level() Level {
-	return Level(atomic.LoadUint32((*uint32)(&logger.Level)))
+func (l *Logger) Debugln(args ...interface{}) {
+	l.log(DebugLevel, fmt.Sprintln(args...))
 }
 
-func (logger *Logger) IsLevelEnabled(level Level) bool {
-	return logger.level() >= level
+func (l *Logger) Infoln(args ...interface{}) {
+	l.log(InfoLevel, fmt.Sprintln(args...))
+}
+
+func (l *Logger) Errorln(args ...interface{}) {
+	l.log(ErrorLevel, fmt.Sprintln(args...))
+}
+
+func (l *Logger) Println(args ...interface{}) {
+	l.log(InfoLevel, fmt.Sprintln(args...))
+}
+
+func (l *Logger) Warnln(args ...interface{}) {
+	l.log(WarnLevel, fmt.Sprintln(args...))
+}
+
+func (l *Logger) Panicf(format string, args ...interface{}) {
+	l.log(PanicLevel, fmt.Sprintf(format, args...))
+}
+
+func (l *Logger) Fatalf(format string, args ...interface{}) {
+	l.log(FatalLevel, fmt.Sprintf(format, args...))
+}
+
+func (l *Logger) Debugf(format string, args ...interface{}) {
+	l.log(DebugLevel, fmt.Sprintf(format, args...))
+}
+
+func (l *Logger) Infof(format string, args ...interface{}) {
+	l.log(InfoLevel, fmt.Sprintf(format, args...))
+}
+
+func (l *Logger) Errorf(format string, args ...interface{}) {
+	l.log(ErrorLevel, fmt.Sprintf(format, args...))
+}
+
+func (l *Logger) Printf(format string, args ...interface{}) {
+	l.log(InfoLevel, fmt.Sprintf(format, args...))
+}
+
+func (l *Logger) Warnf(format string, args ...interface{}) {
+	l.log(WarnLevel, fmt.Sprintf(format, args...))
 }

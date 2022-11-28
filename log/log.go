@@ -1,50 +1,57 @@
 package log
 
-import "errors"
+import "time"
 
-type Level uint32
-type Fields map[string]interface{}
+var defaultLogger *Logger
 
-const (
-	PanicLevel Level = iota
-	FatalLevel
-	ErrorLevel
-	WarnLevel
-	InfoLevel
-	DebugLevel
-	TraceLevel
-)
-
-var AllLevels = []Level{
-	PanicLevel,
-	FatalLevel,
-	ErrorLevel,
-	WarnLevel,
-	InfoLevel,
-	DebugLevel,
-	TraceLevel,
+func init() {
+	defaultLogger, _ = NewLogger(WithLogPath("./Logs"), WithMaxSize(100*1024*1024), WithMaxSaveTime(30*time.Second))
 }
 
-var levelString = [...]string{
-	"[PANIC]",
-	"[FATAL]",
-	"[ERROR]",
-	"[WARN]",
-	"[INFO]",
-	"[DEBUG]",
-	"[TRACE]",
+func Panic(args ...interface{}) {
+	defaultLogger.Panic(args...)
 }
 
-func (level Level) String() string {
-	if b, err := level.MarshalText(); err == nil {
-		return b
-	} else {
-		return "unknown"
-	}
+func Panicf(template string, args ...interface{}) {
+	defaultLogger.Panicf(template, args...)
 }
-func (level Level) MarshalText() (string, error) {
-	if int(level) > len(levelString) {
-		return "", errors.New("invalid level")
-	}
-	return levelString[level], nil
+
+func Fatal(args ...interface{}) {
+	defaultLogger.Fatal(args...)
+}
+
+func Fatalf(template string, args ...interface{}) {
+	defaultLogger.Fatalf(template, args...)
+}
+
+func Error(args ...interface{}) {
+	defaultLogger.Error(args...)
+}
+
+func Errorf(template string, args ...interface{}) {
+	defaultLogger.Errorf(template, args...)
+}
+
+func Warn(args ...interface{}) {
+	defaultLogger.Warn(args...)
+}
+
+func Warnf(template string, args ...interface{}) {
+	defaultLogger.Warnf(template, args...)
+}
+
+func Info(args ...interface{}) {
+	defaultLogger.Info(args...)
+}
+
+func Infof(template string, args ...interface{}) {
+	defaultLogger.Infof(template, args...)
+}
+
+func Debug(args ...interface{}) {
+	defaultLogger.Debug(args...)
+}
+
+func Debugf(template string, args ...interface{}) {
+	defaultLogger.Debugf(template, args...)
 }

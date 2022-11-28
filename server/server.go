@@ -4,12 +4,8 @@ import (
 	"encoding/binary"
 	"fmt"
 	"jnet/network/base"
-	"jnet/network/tcp"
 	"math/rand"
 	"net"
-	"os"
-	"os/signal"
-	"syscall"
 	"time"
 )
 
@@ -24,16 +20,21 @@ func test(request base.IRequest) bool {
 }
 
 func main() {
-	tcpServer := tcp.NewServer("127.0.0.1:1440")
-	tcpServer.BindPacketFunc(test)
-	tcpServer.Serve()
-	c := make(chan os.Signal, 1)
-
-	signal.Notify(c, os.Interrupt, os.Kill, syscall.SIGTERM)
-	time.Sleep(5 * time.Second)
-	ClientTest(1)
-	s := <-c
-	fmt.Printf("server exit ------- signal:[%v]", s)
+	//logger := log.New()
+	//logger.SetReportCaller(true)
+	//for i := 0; i < 10000; i++ {
+	//	logger.Info("hello ", i)
+	//}
+	//tcpServer := tcp.NewServer("127.0.0.1:1440")
+	//tcpServer.BindPacketFunc(test)
+	//tcpServer.Serve()
+	//c := make(chan os.Signal, 1)
+	//
+	//signal.Notify(c, os.Interrupt, os.Kill, syscall.SIGTERM)
+	//time.Sleep(5 * time.Second)
+	//ClientTest(1)
+	//s := <-c
+	//fmt.Printf("server exit ------- signal:[%v]", s)
 }
 
 func ClientTest(i uint32) {

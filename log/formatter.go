@@ -1,83 +1,63 @@
 package log
 
 import (
-	"bytes"
-	"fmt"
 	"time"
+)
+
+const (
+	defaultTimestampFormat = time.RFC3339
+	FieldKeyMsg            = "msg"
+	FieldKeyLevel          = "level"
+	FieldKeyTime           = "time"
+	FieldKeyFunc           = "func"
+	FieldKeyFile           = "file"
 )
 
 type Formatter interface {
 	Format(*Entry) ([]byte, error)
 }
 
-func timeFormatItoA(number int, wid int) []byte {
-	var temp [10]byte
-	moveIndex := len(temp) - 1
-	for number >= 10 || wid > 1 {
-		wid--
-		temp[moveIndex] = byte('0' + (number % 10))
-		moveIndex--
-		number /= 10
+type fieldKey string
+
+type FieldMap map[fieldKey]string
+
+func (f FieldMap) resolve(key fieldKey) string {
+	if k, ok := f[key]; ok {
+		return k
 	}
-	temp[moveIndex] = byte('0' + number)
-	return temp[moveIndex:]
+
+	return string(key)
 }
 
-type TextFormatter struct {
-	DisableTimestamp bool
-}
-
-func (f *TextFormatter) Format(entry *Entry) ([]byte, error) {
-	var b *bytes.Buffer
-	if entry.Buffer != nil {
-		b = entry.Buffer
-	} else {
-		b = &bytes.Buffer{}
-	}
-	b.WriteString(entry.Level.String())
-	if !f.DisableTimestamp {
-		f.TimeFormat(b, entry.Time)
-	}
-	var callerVal string
-	if entry.HasCaller() {
-		callerVal = fmt.Sprintf("[%s:%d:%s]", entry.Caller.File, entry.Caller.Line, entry.Caller.Function)
-		b.WriteString(callerVal)
+func mergeField(data Fields, fieldMap FieldMap, reportCaller bool) {
+	timeKey := fieldMap.resolve(FieldKeyTime)
+	if t, ok := data[timeKey]; ok {
+		data["fields."+timeKey] = t
+		delete(data, timeKey)
 	}
 
-	if entry.Message != "" {
-		b.WriteString(" ")
-		b.WriteString(entry.Message)
+	msgKey := fieldMap.resolve(FieldKeyMsg)
+	if m, ok := data[msgKey]; ok {
+		data["fields."+msgKey] = m
+		delete(data, msgKey)
 	}
 
-	b.WriteByte('\n')
-	return b.Bytes(), nil
-}
+	levelKey := fieldMap.resolve(FieldKeyLevel)
+	if l, ok := data[levelKey]; ok {
+		data["fields."+levelKey] = l
+		delete(data, levelKey)
+	}
 
-func (f *TextFormatter) TimeFormat(b *bytes.Buffer, t time.Time) {
-	b.WriteByte('[')
-	year, month, day := t.Date()
-	yearStr := timeFormatItoA(year, 4)
-	b.Write(yearStr)
-	b.WriteByte('/')
-	monthStr := timeFormatItoA(int(month), 2)
-	b.Write(monthStr)
-	b.WriteByte('/')
-	dayStr := timeFormatItoA(day, 2)
-	b.Write(dayStr)
-	b.WriteByte(' ')
-	hour, min, sec := t.Clock()
-	hourStr := timeFormatItoA(hour, 2)
-	b.Write(hourStr)
-	b.WriteByte(':')
-	minStr := timeFormatItoA(min, 2)
-	b.Write(minStr)
-	b.WriteByte(':')
-	secStr := timeFormatItoA(sec, 2)
-	b.Write(secStr)
-	b.WriteByte('.')
-	msStr := timeFormatItoA(t.Nanosecond()/1e6, 3)
-	b.Write(msStr)
-	b.WriteByte(']')
+	if reportCaller {
+		funcKey := fieldMap.resolve(FieldKeyFunc)
+		if l, ok := data[funcKey]; ok {
+			data["fields."+funcKey] = l
+		}
+		fileKey := fieldMap.resolve(FieldKeyFile)
+		if l, ok := data[fileKey]; ok {
+			data["fields."+fileKey] = l
+		}
+	}
 }
 
 type NullFormatter struct {

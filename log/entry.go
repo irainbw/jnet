@@ -32,22 +32,55 @@ type Entry struct {
 	Time    time.Time
 	Message string
 	Caller  *runtime.Frame
+	Data    Fields
 }
 
 func NewEntry(logger *Logger) *Entry {
 	return &Entry{
 		Logger: logger,
+		Data:   make(Fields, 6),
 	}
 }
 
 func (entry *Entry) Dup() *Entry {
-	return &Entry{Logger: entry.Logger, Time: entry.Time}
+	data := make(Fields, len(entry.Data))
+	for k, v := range entry.Data {
+		data[k] = v
+	}
+	return &Entry{Logger: entry.Logger, Data: data, Time: entry.Time}
+}
+
+func (entry *Entry) Bytes() ([]byte, error) {
+	return entry.Logger.Formatter.Format(entry)
 }
 
 func (entry Entry) HasCaller() (has bool) {
 	return entry.Logger != nil &&
 		entry.Logger.ReportCaller &&
 		entry.Caller != nil
+}
+
+func (entry *Entry) WithField(key string, value interface{}) *Entry {
+	return entry.WithFields(Fields{key: value})
+}
+
+func (entry *Entry) WithFields(fields Fields) *Entry {
+	data := make(Fields, len(entry.Data)+len(fields))
+	for k, v := range entry.Data {
+		data[k] = v
+	}
+	for k, v := range fields {
+		data[k] = v
+	}
+	return &Entry{Logger: entry.Logger, Data: data, Time: entry.Time}
+}
+
+func (entry *Entry) WithTime(t time.Time) *Entry {
+	dataCopy := make(Fields, len(entry.Data))
+	for k, v := range entry.Data {
+		dataCopy[k] = v
+	}
+	return &Entry{Logger: entry.Logger, Data: dataCopy, Time: t}
 }
 
 func (entry *Entry) log(level Level, msg string) {
@@ -127,7 +160,7 @@ func getCaller() *runtime.Frame {
 		pkg := getPackageName(f.Function)
 
 		if pkg != curPackage {
-			return &f //nolint:scopelint
+			return &f
 		}
 	}
 
