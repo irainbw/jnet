@@ -3,6 +3,7 @@ package log
 import (
 	"fmt"
 	"os"
+	"runtime"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -87,6 +88,14 @@ func (l *Logger) log(level Level, message string) {
 	b.WriteString("[")
 	b.WriteString(timeDesc)
 	b.WriteString("] ")
+	if !l.config.DisableReportCaller {
+		_, fileName, line, ok := runtime.Caller(2)
+		if ok {
+			b.WriteString("[")
+			b.WriteString(fmt.Sprintf("%s:%d", fileName, line))
+			b.WriteString("] ")
+		}
+	}
 	b.WriteString(message)
 	b.WriteString("\n")
 	logStr := Copy(b.Bytes())
@@ -161,6 +170,7 @@ func (l *Logger) Panicln(args ...interface{}) {
 
 func (l *Logger) FatalLn(args ...interface{}) {
 	l.log(FatalLevel, fmt.Sprintln(args...))
+	l.exit()
 }
 
 func (l *Logger) Debugln(args ...interface{}) {
@@ -189,6 +199,7 @@ func (l *Logger) Panicf(format string, args ...interface{}) {
 
 func (l *Logger) Fatalf(format string, args ...interface{}) {
 	l.log(FatalLevel, fmt.Sprintf(format, args...))
+	l.exit()
 }
 
 func (l *Logger) Debugf(format string, args ...interface{}) {

@@ -4,6 +4,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"jnet/network/base"
+	"jnet/network/tcp"
 	"math/rand"
 	"net"
 	"time"
@@ -25,7 +26,7 @@ func main() {
 	//for i := 0; i < 10000; i++ {
 	//	logger.Info("hello ", i)
 	//}
-	//tcpServer := tcp.NewServer("127.0.0.1:1440")
+	tcpServer := tcp.NewServer("127.0.0.1:1440")
 	//tcpServer.BindPacketFunc(test)
 	//tcpServer.Serve()
 	//c := make(chan os.Signal, 1)
@@ -35,6 +36,7 @@ func main() {
 	//ClientTest(1)
 	//s := <-c
 	//fmt.Printf("server exit ------- signal:[%v]", s)
+
 }
 
 func ClientTest(i uint32) {
